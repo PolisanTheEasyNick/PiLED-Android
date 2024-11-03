@@ -1,16 +1,18 @@
 package dev.polisan.piled
 
+import android.content.Context
 import android.util.Log
+import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.InputStream
@@ -39,19 +41,44 @@ enum class OP(var value: Int) {
 }
 
 object PiLED {
-    private const val sharedSecret = "shared_secret"
+    private var sharedSecret: String? = null
     private const val defaultIp = "192.168.0.5"
     private const val defaultPort = 3384
     private const val version = 4;
+    private lateinit var appContext: Context
 
     private var socket: Socket? = null
     private var inputStream: InputStream? = null
     private var outputStream: OutputStream? = null
 
     private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val connectionMutex = Mutex()
 
     var isConnected by mutableStateOf(false)
         private set
+
+    var currentColor by mutableStateOf<Color>(Color(0, 0, 0))
+        private set
+
+    fun initialize(context: Context) {
+        appContext = context.applicationContext
+        val prefs = context.getSharedPreferences("PiLEDPrefs", Context.MODE_PRIVATE)
+        sharedSecret = prefs.getString("shared_secret", null)
+        if (sharedSecret == null) {
+            Log.w("PiLED", "Shared secret not found in preferences. Please set it in settings.")
+            Toast.makeText(context, "Shared secret not found in preferences. Please set it in settings.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private inline fun <T> withSharedSecret(action: () -> T): T? {
+        return if (sharedSecret != null) {
+            action()
+        } else {
+            Log.e("PiLED", "Shared secret is not defined. Please set it in settings.")
+            Toast.makeText(appContext, "Shared secret is not defined. Please set it in settings.", Toast.LENGTH_LONG).show()
+            null
+        }
+    }
 
     /**
      * Establishes a connection to the server at the specified IP and port.
@@ -104,7 +131,7 @@ object PiLED {
                     }
                 }
             } catch (e: Exception) {
-                Log.e("PiLED", "Error in listening: ${e.message}")
+                Log.e("PiLED", "Error in listening: ${e}")
                 disconnect()
             }
         }
@@ -115,16 +142,31 @@ object PiLED {
      */
     private fun handleReceivedData(data: ByteArray) {
         coroutineScope.launch {
+            val tag = "PiLED-Parser"
             // Parse the data as needed. For now, log the received data.
-            Log.d("PiLED", "Received data: ${data.joinToString(" ") { "%02x".format(it) }}")
-            // Add actual parsing logic here
+            Log.d(tag, "Received data: ${data.joinToString(" ") { "%02x".format(it) }}")
+            //parsing HEADER
+            val receivedVersion = data[16].toInt()
+            val receivedOP = data[17].toInt()
+            Log.d(tag, "Version: $receivedVersion")
+            Log.d(tag, "Operational Code: $receivedOP")
+            when(receivedOP) {
+                OP.SYS_COLOR_CHANGED.value -> {
+                    Log.d(tag, "SYS_COLOR_CHANGED")
+                    val red = data[50].toInt() and 0xFF
+                    val green = data[51].toInt() and 0xFF
+                    val blue = data[52].toInt() and 0xFF
+                    currentColor = Color(red / 255f, green / 255f, blue / 255f)
+                    Log.d(tag, "New color: $currentColor")
+                }
+            }
         }
     }
 
     /**
      * Sends color data to the server.
      */
-    fun sendColor(color: Color) {
+    fun sendColor(color: Color) = withSharedSecret {
         val header = generateHeader(OP.LED_SET_COLOR)
         val red = (color.red * 255).toInt().toByte()
         val green = (color.green * 255).toInt().toByte()
@@ -137,29 +179,19 @@ object PiLED {
     /**
      * Sends a toggle suspend command to the server.
      */
-    fun sendSuspend() {
+    fun sendSuspend() = withSharedSecret {
         val header = generateHeader(OP.SYS_TOGGLE_SUSPEND)
         val payload = byteArrayOf(209.toByte(), 0.toByte(), 255.toByte(), 3.toByte(), 0.toByte())
         val packet = createPacket(header, payload)
         sendPacket(packet)
     }
-
     /**
      * Requests the current color from the server.
      */
-    suspend fun requestColor(): Color? {
+    fun requestColor() = withSharedSecret {
         val header = generateHeader(OP.LED_GET_CURRENTCOLOR)
         val packet = createPacket(header, ByteArray(0))
-        val response = sendPacket(packet, waitResponse = true) ?: return null
-
-        return if (response.size >= 11) {
-            val red = response[8].toInt() and 0xFF
-            val green = response[9].toInt() and 0xFF
-            val blue = response[10].toInt() and 0xFF
-            Color(red / 255f, green / 255f, blue / 255f)
-        } else {
-            null
-        }
+        sendPacket(packet)
     }
 
     private fun generateHeader(opCode: OP): ByteArray {
@@ -171,21 +203,28 @@ object PiLED {
     }
 
     private fun createPacket(header: ByteArray, payload: ByteArray): ByteArray {
-        val hmac = hmacSha256(sharedSecret, header + payload)
+        if(sharedSecret == null) return byteArrayOf()
+        val hmac = hmacSha256(sharedSecret!!, header + payload)
         return header + hmac + payload
     }
 
     private fun sendPacket(data: ByteArray, waitResponse: Boolean = false): ByteArray? {
-        return try {
-            outputStream?.write(data)
-            outputStream?.flush()
-            Log.d("PiLED", "Packet sent")
-            if (waitResponse) inputStream?.readBytes() else null
-        } catch (e: Exception) {
-            Log.e("PiLED", "Error sending packet: ${e.message}")
-            disconnect()
-            null
+        var response: ByteArray? = null
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                outputStream?.write(data)
+                outputStream?.flush()
+                Log.d("PiLED", "Packet sent")
+
+                if (waitResponse) {
+                    response = inputStream?.readBytes()
+                }
+            } catch (e: Exception) {
+                Log.e("PiLED", "Error sending packet: ${e}")
+                disconnect()
+            }
         }
+        return if (waitResponse) response else null
     }
 
     private fun hmacSha256(secret: String, data: ByteArray): ByteArray {
