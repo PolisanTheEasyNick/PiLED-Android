@@ -13,6 +13,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -25,6 +26,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import dev.polisan.piled.PiLED.appContext
+import dev.polisan.piled.PiLED.defaultIp
+import dev.polisan.piled.PiLED.defaultPort
 import dev.polisan.piled.PiLED.isConnected
 import dev.polisan.piled.ui.theme.PiLEDTheme
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +42,9 @@ var openSettings by mutableStateOf(false)
     private set
 
 class MainActivity : ComponentActivity() {
+
+    private val mainActivityContext = this
+
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,7 +69,7 @@ class MainActivity : ComponentActivity() {
                             context = this
                         )
                     } else {
-                        MainLayout(modifier = Modifier.padding(innerPadding))
+                        MainLayout(context = this, modifier = Modifier.padding(innerPadding))
                     }
                 }
             }
@@ -83,10 +90,10 @@ fun SettingsIcon(onClick: () -> Unit) {
 
 
 @Composable
-fun MainLayout(modifier: Modifier = Modifier) {
+fun MainLayout(context: Context, modifier: Modifier = Modifier) {
     var isLoading by remember { mutableStateOf(false) }
-    var address by remember { mutableStateOf(TextFieldValue("192.168.0.4")) }
-    var port by remember { mutableStateOf(TextFieldValue("3384")) }
+    var address by remember { mutableStateOf(TextFieldValue(getSetting(context, "piled_ip"))) }
+    var port by remember { mutableStateOf(TextFieldValue(getSetting(context, "piled_port"))) }
     val coroutineScope = rememberCoroutineScope()
 
     if (!isConnected) {
@@ -99,7 +106,7 @@ fun MainLayout(modifier: Modifier = Modifier) {
             onConnect = {
                 coroutineScope.launch {
                     isLoading = true
-                    PiLED.connect(address.text, port.text.toInt())
+                    PiLED.connect(address.text, port.text)
                     isLoading = false
                 }
             }
@@ -206,7 +213,9 @@ fun CurrentColor(color: Color) {
 
 @Composable
 fun SettingsUI(onClose: () -> Unit, context: Context) {
-    var sharedSecret by remember { mutableStateOf(TextFieldValue(getSavedSharedSecret(context))) }
+    var sharedSecret by remember { mutableStateOf(TextFieldValue(getSetting(context, "shared_secret"))) }
+    var ip by remember { mutableStateOf(TextFieldValue(getSetting(context, "piled_ip"))) }
+    var port by remember { mutableStateOf(TextFieldValue(getSetting(context, "piled_port"))) }
 
     Column(
         modifier = Modifier
@@ -221,34 +230,46 @@ fun SettingsUI(onClose: () -> Unit, context: Context) {
             label = { Text("Shared Secret") },
             modifier = Modifier.fillMaxWidth()
         )
+        Spacer(modifier = Modifier.width(4.dp))
+        OutlinedTextField(
+            value = ip,
+            onValueChange = { ip = it },
+            label = { Text("PiLED IP") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        OutlinedTextField(
+            value = port,
+            onValueChange = { port = it },
+            label = { Text("PiLED Port") },
+            modifier = Modifier.fillMaxWidth()
+        )
         Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = {
-            saveSharedSecret(context, sharedSecret.text)
-            onClose()
-        }) {
-            Text("Save")
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onClose) {
-            Text("Cancel")
+        Row() {
+            OutlinedButton(onClick = onClose) {
+                Text("Cancel")
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Button(onClick = {
+                saveSetting(context, "shared_secret", sharedSecret.text)
+                saveSetting(context, "piled_ip", ip.text)
+                saveSetting(context, "piled_port", port.text)
+                defaultIp = ip.text
+                defaultPort = port.text
+                onClose()
+            }) {
+                Text("Save")
+            }
         }
     }
 }
 
-private fun saveSharedSecret(context: Context, secret: String) {
+private fun saveSetting(context: Context, setting: String, value: String) {
     val prefs = context.getSharedPreferences("PiLEDPrefs", Context.MODE_PRIVATE)
-    prefs.edit().putString("shared_secret", secret).apply()
+    prefs.edit().putString(setting, value).apply()
 }
 
-private fun getSavedSharedSecret(context: Context): String {
+private fun getSetting(context: Context, setting: String): String {
     val prefs = context.getSharedPreferences("PiLEDPrefs", Context.MODE_PRIVATE)
-    return prefs.getString("shared_secret", "") ?: ""
-}
-
-@Preview(showBackground = true)
-@Composable
-fun DefaultPreview() {
-    PiLEDTheme {
-        MainLayout()
-    }
+    return prefs.getString(setting, "") ?: ""
 }

@@ -8,7 +8,9 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.IntentCompat.getParcelableArrayExtra
+import androidx.lifecycle.lifecycleScope
 import dev.polisan.piled.PiLED.sendSuspend
+import kotlinx.coroutines.launch
 
 class NFCReader : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -23,12 +25,19 @@ class NFCReader : ComponentActivity() {
                     val uriPayload = ndefRecord.toUri().toString()
                     if (uriPayload == "piled://room_presence") {
                         Log.d("NFC", "piled://room_presence NFC tag detected!")
-                        sendSuspend()
+
+                        PiLED.initialize(this)
+                        lifecycleScope.launch {
+                            PiLED.connect {
+                                Log.d("NFC", "PiLED connected! Sending suspend...")
+                                sendSuspend()
+                            }
+                        }
                     }
                 }
             }
         }
+
         finish()
     }
-
 }

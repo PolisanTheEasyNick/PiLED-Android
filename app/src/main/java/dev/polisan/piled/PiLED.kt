@@ -42,10 +42,10 @@ enum class OP(var value: Int) {
 
 object PiLED {
     private var sharedSecret: String? = null
-    private const val defaultIp = "192.168.0.5"
-    private const val defaultPort = 3384
+    var defaultIp = "192.168.0.5"
+    var defaultPort = "3384"
     private const val version = 4;
-    private lateinit var appContext: Context
+    lateinit var appContext: Context
 
     private var socket: Socket? = null
     private var inputStream: InputStream? = null
@@ -68,6 +68,10 @@ object PiLED {
             Log.w("PiLED", "Shared secret not found in preferences. Please set it in settings.")
             Toast.makeText(context, "Shared secret not found in preferences. Please set it in settings.", Toast.LENGTH_LONG).show()
         }
+
+        defaultIp = prefs.getString("piled_ip", null) ?: "192.168.0.4"
+        defaultPort = prefs.getString("piled_port", null) ?: "3384"
+        Log.d("PiLED", "Initialized PiLED with $defaultIp:$defaultPort")
     }
 
     private inline fun <T> withSharedSecret(action: () -> T): T? {
@@ -83,16 +87,19 @@ object PiLED {
     /**
      * Establishes a connection to the server at the specified IP and port.
      */
-    suspend fun connect(ip: String = defaultIp, port: Int = defaultPort): Boolean {
+    suspend fun connect(ip: String = defaultIp, port: String = defaultPort, onConnected: (() -> Unit)? = null): Boolean {
         return withContext(Dispatchers.IO) {
             try {
                 socket = Socket()
-                socket!!.connect(InetSocketAddress(ip, port), 5000)
+                socket!!.connect(InetSocketAddress(ip, port.toInt()), 5000)
                 inputStream = BufferedInputStream(socket!!.getInputStream())
                 outputStream = socket!!.getOutputStream()
                 isConnected = true
                 Log.d("PiLED", "Connected to $ip:$port")
                 startListening()
+
+                onConnected?.invoke()
+
                 true
             } catch (e: Exception) {
                 Log.e("PiLED", "Connection failed: ${e.message}")
@@ -101,6 +108,7 @@ object PiLED {
             }
         }
     }
+
 
     /**
      * Closes the connection.
@@ -173,7 +181,9 @@ object PiLED {
         val blue = (color.blue * 255).toInt().toByte()
         val payload = byteArrayOf(red, green, blue, 3, 0)
         val packet = createPacket(header, payload)
-        sendPacket(packet)
+        coroutineScope.launch {
+            sendPacket(packet)
+        }
     }
 
     /**
@@ -183,7 +193,9 @@ object PiLED {
         val header = generateHeader(OP.SYS_TOGGLE_SUSPEND)
         val payload = byteArrayOf(209.toByte(), 0.toByte(), 255.toByte(), 3.toByte(), 0.toByte())
         val packet = createPacket(header, payload)
-        sendPacket(packet)
+        coroutineScope.launch {
+            sendPacket(packet)
+        }
     }
     /**
      * Requests the current color from the server.
@@ -191,7 +203,9 @@ object PiLED {
     fun requestColor() = withSharedSecret {
         val header = generateHeader(OP.LED_GET_CURRENTCOLOR)
         val packet = createPacket(header, ByteArray(0))
-        sendPacket(packet)
+        coroutineScope.launch {
+            sendPacket(packet)
+        }
     }
 
     private fun generateHeader(opCode: OP): ByteArray {
@@ -208,24 +222,22 @@ object PiLED {
         return header + hmac + payload
     }
 
-    private fun sendPacket(data: ByteArray, waitResponse: Boolean = false): ByteArray? {
-        var response: ByteArray? = null
-        CoroutineScope(Dispatchers.IO).launch {
+    private suspend fun sendPacket(data: ByteArray){
+        return withContext(Dispatchers.IO) {
             try {
+                val address = socket?.remoteSocketAddress?.toString() ?: "Unknown"
+                Log.d("PiLED", "Sending packet to $address")
+
                 outputStream?.write(data)
                 outputStream?.flush()
-                Log.d("PiLED", "Packet sent")
-
-                if (waitResponse) {
-                    response = inputStream?.readBytes()
-                }
+                Log.d("PiLED", "Packet sent to $address")
             } catch (e: Exception) {
-                Log.e("PiLED", "Error sending packet: ${e}")
+                Log.e("PiLED", "Error sending packet to ${socket?.remoteSocketAddress}: ${e}")
                 disconnect()
             }
         }
-        return if (waitResponse) response else null
     }
+
 
     private fun hmacSha256(secret: String, data: ByteArray): ByteArray {
         val keySpec = SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256")
