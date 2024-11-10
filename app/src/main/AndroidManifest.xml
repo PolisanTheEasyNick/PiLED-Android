@@ -3,7 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.NFC" />
-    <uses-feature android:name="android.hardware.nfc" android:required="true"
+    <uses-feature android:name="android.hardware.nfc" android:required="false"
         tools:ignore="UnnecessaryRequiredFeature" />
     <uses-permission android:name="android.permission.INTERNET" />
 
