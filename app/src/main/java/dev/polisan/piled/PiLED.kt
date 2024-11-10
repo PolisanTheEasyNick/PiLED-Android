@@ -12,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.InputStream
@@ -23,13 +22,6 @@ import java.nio.ByteBuffer
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
-
-fun Color.toHexCode(): String {
-    val red = this.red * 255
-    val green = this.green * 255
-    val blue = this.blue * 255
-    return String.format("%02x%02x%02x", red.toInt(), green.toInt(), blue.toInt())
-}
 
 enum class OP(var value: Int) {
     LED_SET_COLOR(0),
@@ -44,7 +36,7 @@ object PiLED {
     private var sharedSecret: String? = null
     var defaultIp = "192.168.0.5"
     var defaultPort = "3384"
-    private const val version = 4;
+    private const val version = 4
     lateinit var appContext: Context
 
     private var socket: Socket? = null
@@ -52,17 +44,28 @@ object PiLED {
     private var outputStream: OutputStream? = null
 
     private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val connectionMutex = Mutex()
 
     var isConnected by mutableStateOf(false)
         private set
 
-    var currentColor by mutableStateOf<Color>(Color(0, 0, 0))
+    var currentColor by mutableStateOf(Color(0, 0, 0))
         private set
 
     fun initialize(context: Context) {
         appContext = context.applicationContext
         val prefs = context.getSharedPreferences("PiLEDPrefs", Context.MODE_PRIVATE)
+
+        val isFirstRun = prefs.getBoolean("isFirstRun", true)
+        if (isFirstRun) {
+            prefs.edit()
+                .putString("shared_secret", "shared_secret")
+                .putString("piled_ip", "192.168.0.4")
+                .putString("piled_port", "3384")
+                .putBoolean("isFirstRun", false)
+                .apply()
+            Log.d("PiLED", "Default settings applied on first startup")
+        }
+
         sharedSecret = prefs.getString("shared_secret", null)
         if (sharedSecret == null) {
             Log.w("PiLED", "Shared secret not found in preferences. Please set it in settings.")
@@ -75,6 +78,8 @@ object PiLED {
     }
 
     private inline fun <T> withSharedSecret(action: () -> T): T? {
+        val prefs = appContext.getSharedPreferences("PiLEDPrefs", Context.MODE_PRIVATE)
+        sharedSecret = prefs.getString("shared_secret", null)
         return if (sharedSecret != null) {
             action()
         } else {
@@ -99,7 +104,7 @@ object PiLED {
                 startListening()
 
                 onConnected?.invoke()
-
+                requestColor()
                 true
             } catch (e: Exception) {
                 Log.e("PiLED", "Connection failed: ${e.message}")
@@ -179,7 +184,7 @@ object PiLED {
         val red = (color.red * 255).toInt().toByte()
         val green = (color.green * 255).toInt().toByte()
         val blue = (color.blue * 255).toInt().toByte()
-        val payload = byteArrayOf(red, green, blue, 3, 0)
+        val payload = byteArrayOf(red, green, blue, 0, 0)
         val packet = createPacket(header, payload)
         coroutineScope.launch {
             sendPacket(packet)
@@ -197,6 +202,29 @@ object PiLED {
             sendPacket(packet)
         }
     }
+
+    /**
+     * Start Fade animation
+     */
+    fun startFadeAnimation(color: Color, duration: Int, speed: Int) = withSharedSecret {
+        val header = generateHeader(OP.ANIM_SET_FADE)
+        val payload = byteArrayOf((color.red*255).toInt().toByte(), (color.green*255).toInt().toByte(), (color.blue*255).toInt().toByte(), duration.toByte(), speed.toByte())
+        val packet = createPacket(header, payload)
+        coroutineScope.launch {
+            sendPacket(packet)
+        }
+    }
+
+    fun startPulseAnimation(color: Color, duration: Int, speed: Int) = withSharedSecret {
+        val header = generateHeader(OP.ANIM_SET_PULSE)
+        //                                    v-- tf is that to int to byte cursed shit
+        val payload = byteArrayOf((color.red*255).toInt().toByte(), (color.green*255).toInt().toByte(), (color.blue*255).toInt().toByte(), duration.toByte(), speed.toByte())
+        val packet = createPacket(header, payload)
+        coroutineScope.launch {
+            sendPacket(packet)
+        }
+    }
+
     /**
      * Requests the current color from the server.
      */

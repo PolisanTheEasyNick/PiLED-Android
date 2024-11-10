@@ -11,11 +11,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.*
@@ -24,26 +28,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import dev.polisan.piled.PiLED.appContext
 import dev.polisan.piled.PiLED.defaultIp
 import dev.polisan.piled.PiLED.defaultPort
 import dev.polisan.piled.PiLED.isConnected
 import dev.polisan.piled.ui.theme.PiLEDTheme
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.IOException
-import java.net.InetSocketAddress
-import java.net.Socket
 
 var openSettings by mutableStateOf(false)
     private set
 
 class MainActivity : ComponentActivity() {
-
-    private val mainActivityContext = this
 
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -113,13 +108,19 @@ fun MainLayout(context: Context, modifier: Modifier = Modifier) {
         )
     } else {
         MainUI(
+            modifier = modifier,
             color = PiLED.currentColor,
+            onColorUpdate = { newColor ->
+                coroutineScope.launch {
+                    PiLED.sendColor(newColor)
+                }
+            },
             onDisconnect = {
                 PiLED.disconnect()
             },
-            onRequestColor = {
+            onToggleSuspend = {
                 coroutineScope.launch {
-                    PiLED.requestColor()
+                    PiLED.sendSuspend()
                 }
             }
         )
@@ -178,37 +179,142 @@ fun ConnectUI(
 
 @Composable
 fun MainUI(
+    modifier: Modifier,
     color: Color,
+    onColorUpdate: (Color) -> Unit,
     onDisconnect: () -> Unit,
-    onRequestColor: () -> Unit
+    onToggleSuspend: () -> Unit,
 ) {
+    var duration by remember { mutableStateOf(3.0f) }
+    var speed by remember { mutableStateOf(1.0f) }
+    val coroutineScope = rememberCoroutineScope()
+
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(16.dp)
     ) {
-        CurrentColor(color = color)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .background(color)
+        )
+
         Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onRequestColor) {
-            Text("Request Current Color")
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        ) {
+            ColorSlider("Red", color.red) { newRed ->
+                onColorUpdate(color.copy(red = newRed))
+            }
+            ColorSlider("Green", color.green) { newGreen ->
+                onColorUpdate(color.copy(green = newGreen))
+            }
+            ColorSlider("Blue", color.blue) { newBlue ->
+                onColorUpdate(color.copy(blue = newBlue))
+            }
         }
+
+        //animations section
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+            thickness = 1.dp,
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+
         Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onDisconnect) {
-            Text("Disconnect")
+
+        // Animation Buttons Section
+        Text(text = "Duration in seconds")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Slider(
+                value = duration,
+                onValueChange = { duration = it },
+                valueRange = 0f..5f,
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.secondary,
+                    activeTrackColor = MaterialTheme.colorScheme.secondary,
+                    inactiveTrackColor = MaterialTheme.colorScheme.secondaryContainer,
+                ),
+                steps = 5,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(text = "${duration.toInt()}")
+        }
+
+        Text(text = "Speed")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Slider(
+                value = speed,
+                onValueChange = { speed = it },
+                valueRange = 0f..255f,
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.secondary,
+                    activeTrackColor = MaterialTheme.colorScheme.secondary,
+                    inactiveTrackColor = MaterialTheme.colorScheme.secondaryContainer,
+                ),
+                steps = 51,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(text = "${speed.toInt()}")
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Button(onClick = {
+                coroutineScope.launch {
+                    PiLED.startFadeAnimation(color, duration.toInt(), speed.toInt())
+                }
+            }) {
+                Text("Start Fade Animation")
+            }
+            Button(onClick = {
+                coroutineScope.launch {
+                    Log.d("ANIM", "Start pulse anim clicked with ${color.red}, ${color.green}, ${color.blue}")
+                    PiLED.startPulseAnimation(color, duration.toInt(), speed.toInt())
+                }
+            }) {
+                Text("Start Pulse Animation")
+            }
+        }
+
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // Center Functional Buttons
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row{
+                Button(onClick = { onColorUpdate(color) }) { //hehe
+                    Text("Stop Animations")
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Button(onClick = onToggleSuspend) {
+                    Text("Toggle Suspend")
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = onDisconnect) {
+                Text("Disconnect")
+            }
         }
     }
-}
-
-@Composable
-fun CurrentColor(color: Color) {
-    Box(
-        modifier = Modifier
-            .size(100.dp)
-            .background(color)
-            .padding(16.dp)
-    )
 }
 
 @Composable
@@ -261,6 +367,28 @@ fun SettingsUI(onClose: () -> Unit, context: Context) {
                 Text("Save")
             }
         }
+    }
+}
+
+@Composable
+fun ColorSlider(
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit
+) {
+    Column {
+        Text(text = label)
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0f..1f,
+            colors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.secondary,
+                activeTrackColor = MaterialTheme.colorScheme.secondary,
+                inactiveTrackColor = MaterialTheme.colorScheme.secondaryContainer,
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
