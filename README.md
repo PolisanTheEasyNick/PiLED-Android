@@ -10,7 +10,7 @@ The PiLED Android Client is designed to interact with the PiLED server running o
 * Change LED Colors: Adjust the LED strip's colors and set durations for smooth transitions.
 * Animations: Supports fade and pulse animations with adjustable speed and duration.
 * Synchronization with OpenRGB: If your PiLED server is connected to an OpenRGB server, the Android app can send color changes to sync with your PC's RGB devices.
-* Connection Options: Connect via TCP, WebSocket (optional), or HTML interface (optional) as configured on the PiLED server.
+* Connection Options: Connectі via TCP directly to the PiLED server.
 * Suspend Mode: Toggle suspend mode to turn off LEDs and ignore non-suspend commands until re-enabled.
 * NFC Integration: If your device supports NFC, you can trigger specific actions by scanning an NFC tag (tag must be with `piled://room_presence` data.). It will toggle `Suspend` mode. While suspended, PiLED will turn off all lights and will ignore all commands but `Suspend`.
 
