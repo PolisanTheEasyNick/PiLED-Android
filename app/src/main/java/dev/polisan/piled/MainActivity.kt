@@ -6,8 +6,11 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -29,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import dev.polisan.piled.PiLED.defaultColor
 import dev.polisan.piled.PiLED.defaultIp
 import dev.polisan.piled.PiLED.defaultPort
 import dev.polisan.piled.PiLED.isConnected
@@ -83,6 +87,50 @@ fun SettingsIcon(onClick: () -> Unit) {
     }
 }
 
+@Composable
+fun ColorPickerDialog(
+    label: String = "Default Suspend Color",
+    color: Color,
+    onColorUpdate: (Color) -> Unit
+) {
+    Column(modifier = Modifier.padding(0.dp, 8.dp)) {
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .border(
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(4.dp)
+                )
+                .background(color.copy(alpha = 0.9f), shape = RoundedCornerShape(4.dp))
+                .padding(8.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            ColorSlider("Red", color.red) { newRed ->
+                onColorUpdate(color.copy(red = newRed))
+            }
+            ColorSlider("Green", color.green) { newGreen ->
+                onColorUpdate(color.copy(green = newGreen))
+            }
+            ColorSlider("Blue", color.blue) { newBlue ->
+                onColorUpdate(color.copy(blue = newBlue))
+            }
+        }
+    }
+}
 
 @Composable
 fun MainLayout(context: Context, modifier: Modifier = Modifier) {
@@ -318,10 +366,20 @@ fun MainUI(
 }
 
 @Composable
-fun SettingsUI(onClose: () -> Unit, context: Context) {
+fun SettingsUI(onClose: () -> Unit,
+               context: Context) {
     var sharedSecret by remember { mutableStateOf(TextFieldValue(getSetting(context, "shared_secret"))) }
     var ip by remember { mutableStateOf(TextFieldValue(getSetting(context, "piled_ip"))) }
     var port by remember { mutableStateOf(TextFieldValue(getSetting(context, "piled_port"))) }
+
+
+    var previewColor by remember { mutableStateOf(PiLED.defaultColor) }
+
+    LaunchedEffect(PiLED.defaultColor) {
+        previewColor = PiLED.defaultColor
+    }
+
+    PiLED.getDefaultColor()
 
     Column(
         modifier = Modifier
@@ -350,7 +408,15 @@ fun SettingsUI(onClose: () -> Unit, context: Context) {
             label = { Text("PiLED Port") },
             modifier = Modifier.fillMaxWidth()
         )
-        Spacer(modifier = Modifier.height(16.dp))
+
+
+        ColorPickerDialog(
+            color = previewColor,
+            onColorUpdate = { newColor ->
+                previewColor = newColor
+            }
+        )
+        //Spacer(modifier = Modifier.height(16.dp))
         Row() {
             OutlinedButton(onClick = onClose) {
                 Text("Cancel")
@@ -360,6 +426,7 @@ fun SettingsUI(onClose: () -> Unit, context: Context) {
                 saveSetting(context, "shared_secret", sharedSecret.text)
                 saveSetting(context, "piled_ip", ip.text)
                 saveSetting(context, "piled_port", port.text)
+                PiLED.sendDefaultColor(previewColor)
                 defaultIp = ip.text
                 defaultPort = port.text
                 onClose()

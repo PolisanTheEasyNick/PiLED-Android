@@ -29,14 +29,16 @@ enum class OP(var value: Int) {
     ANIM_SET_FADE(2),
     ANIM_SET_PULSE(3),
     SYS_TOGGLE_SUSPEND(4),
-    SYS_COLOR_CHANGED(5)
+    SYS_COLOR_CHANGED(5),
+    SYS_SET_DEFAULT_COLOR(6),
+    SYS_GET_DEFAULT_COLOR(7)
 }
 
 object PiLED {
     private var sharedSecret: String? = null
     var defaultIp = "192.168.0.5"
     var defaultPort = "3384"
-    private const val version = 4
+    private const val version = 5
     lateinit var appContext: Context
 
     private var socket: Socket? = null
@@ -49,6 +51,9 @@ object PiLED {
         private set
 
     var currentColor by mutableStateOf(Color(0, 0, 0))
+        private set
+
+    var defaultColor by mutableStateOf(Color(0, 0, 0))
         private set
 
     fun initialize(context: Context) {
@@ -105,6 +110,7 @@ object PiLED {
 
                 onConnected?.invoke()
                 requestColor()
+                getDefaultColor()
                 true
             } catch (e: Exception) {
                 Log.e("PiLED", "Connection failed: ${e.message}")
@@ -172,6 +178,14 @@ object PiLED {
                     currentColor = Color(red / 255f, green / 255f, blue / 255f)
                     Log.d(tag, "New color: $currentColor")
                 }
+                OP.SYS_GET_DEFAULT_COLOR.value -> {
+                    Log.d(tag, "GET_DEFAULT_COLOR")
+                    val red = data[50].toInt() and 0xFF
+                    val green = data[51].toInt() and 0xFF
+                    val blue = data[52].toInt() and 0xFF
+                    defaultColor = Color(red / 255f, green / 255f, blue / 255f)
+                    Log.d(tag, "New default color: $defaultColor")
+                }
             }
         }
     }
@@ -231,6 +245,26 @@ object PiLED {
     fun requestColor() = withSharedSecret {
         val header = generateHeader(OP.LED_GET_CURRENTCOLOR)
         val packet = createPacket(header, ByteArray(0))
+        coroutineScope.launch {
+            sendPacket(packet)
+        }
+    }
+
+    fun getDefaultColor() = withSharedSecret {
+        val header = generateHeader(OP.SYS_GET_DEFAULT_COLOR)
+        val packet = createPacket(header, ByteArray(0))
+        coroutineScope.launch {
+            sendPacket(packet)
+        }
+    }
+
+    fun sendDefaultColor(color: Color) {
+        val header = generateHeader(OP.SYS_SET_DEFAULT_COLOR)
+        val red = (color.red * 255).toInt().toByte()
+        val green = (color.green * 255).toInt().toByte()
+        val blue = (color.blue * 255).toInt().toByte()
+        val payload = byteArrayOf(red, green, blue, 0, 0)
+        val packet = createPacket(header, payload)
         coroutineScope.launch {
             sendPacket(packet)
         }
